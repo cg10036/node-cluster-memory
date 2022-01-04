@@ -1,7 +1,7 @@
 import cluster from "cluster";
 import os from "os";
 import crypto from "crypto";
-import memory from "./cluster-memory/memory";
+import memory from "./memory";
 
 const numCPUs = os.cpus().length;
 
