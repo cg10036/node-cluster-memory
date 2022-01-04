@@ -73,11 +73,11 @@ async function getWorker(key: string, timeout: number = 5000): Promise<any> {
   }
 }
 
-async function get(key: string): Promise<any> {
+async function get(key: string, timeout: number = 5000): Promise<any> {
   if (cluster.isPrimary) {
     return getPrimary(key);
   } else {
-    return await getWorker(key);
+    return await getWorker(key, timeout);
   }
 }
 
@@ -119,12 +119,13 @@ async function setWorker(
 async function set(
   key: string,
   data: any,
-  expire: number = 3600
+  expire: number = 3600,
+  timeout: number = 5000
 ): Promise<void> {
   if (cluster.isPrimary) {
     return setPrimary(key, data, expire);
   } else {
-    return await setWorker(key, data, expire);
+    return await setWorker(key, data, expire, timeout);
   }
 }
 
