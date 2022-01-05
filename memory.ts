@@ -220,9 +220,10 @@ function init(): void {
   }
 }
 
-export { init, get, set };
+export { init, get, set, del };
 export default {
   init,
   get,
   set,
+  del,
 };
