@@ -16,6 +16,11 @@ interface GetData extends Data {
   pri: number;
 }
 
+interface DelData extends Data {
+  key: string;
+  pri: number;
+}
+
 interface SetData extends Data {
   key: string;
   data: any;
@@ -43,13 +48,7 @@ function setExpireTimeout(key: string, expire?: number): void {
   };
 }
 
-function getPrimary(key: string): any {
-  if (!mem[key]) return;
-  setExpireTimeout(key);
-  return mem[key];
-}
-
-async function getWorker(key: string, timeout: number = 5000): Promise<any> {
+async function ipcFetch(data: any, timeout: number = 5000): Promise<any> {
   if (!process.send) throw Error("Node.js was not spawned with an IPC channel");
   let pri = cnt++;
   if (cnt == Number.MAX_SAFE_INTEGER + 1) cnt = 0;
@@ -57,12 +56,7 @@ async function getWorker(key: string, timeout: number = 5000): Promise<any> {
     promises[pri] = resolve;
   });
   try {
-    process.send({
-      isClusterMemoryData: true,
-      op: "get",
-      key,
-      pri,
-    });
+    process.send({ ...data, pri });
     let result = await Promise.race([
       promise,
       new Promise((_, reject) => setTimeout(reject, timeout)),
@@ -71,6 +65,23 @@ async function getWorker(key: string, timeout: number = 5000): Promise<any> {
   } finally {
     delete promises[pri];
   }
+}
+
+function getPrimary(key: string): any {
+  if (!mem[key]) return;
+  setExpireTimeout(key);
+  return mem[key];
+}
+
+async function getWorker(key: string, timeout: number = 5000): Promise<any> {
+  return await ipcFetch(
+    {
+      isClusterMemoryData: true,
+      op: "get",
+      key,
+    },
+    timeout
+  );
 }
 
 async function get(key: string, timeout: number = 5000): Promise<any> {
@@ -92,27 +103,43 @@ async function setWorker(
   expire: number = 3600,
   timeout: number = 5000
 ): Promise<void> {
-  if (!process.send) throw Error("Node.js was not spawned with an IPC channel");
-  let pri = cnt++;
-  if (cnt == Number.MAX_SAFE_INTEGER + 1) cnt = 0;
-  let promise = new Promise((resolve) => {
-    promises[pri] = resolve;
-  });
-  try {
-    process.send({
+  await ipcFetch(
+    {
       isClusterMemoryData: true,
       op: "set",
       key,
       data,
       expire,
-      pri,
-    });
-    await Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(reject, timeout)),
-    ]);
-  } finally {
-    delete promises[pri];
+    },
+    timeout
+  );
+}
+
+function delPrimary(key: string): void {
+  if (timeouts[key]) {
+    clearTimeout(timeouts[key].timeout);
+  }
+  delete mem[key];
+  delete timeouts[key];
+}
+
+async function delWorker(key: string, timeout: number = 5000): Promise<void> {
+  await ipcFetch(
+    {
+      isClusterMemoryData: true,
+      op: "del",
+      key,
+    },
+    timeout
+  );
+  return;
+}
+
+async function del(key: string, timeout: number = 5000): Promise<void> {
+  if (cluster.isPrimary) {
+    return delPrimary(key);
+  } else {
+    return await delWorker(key, timeout);
   }
 }
 
@@ -150,6 +177,15 @@ function initPrimary(): void {
             isClusterMemoryData: true,
             op: "done",
             pri: setData.pri,
+            data: undefined,
+          });
+        } else if (data.op === "del") {
+          let delData = data as DelData;
+          await del(delData.key);
+          worker.send({
+            isClusterMemoryData: true,
+            op: "done",
+            pri: delData.pri,
             data: undefined,
           });
         } else {
